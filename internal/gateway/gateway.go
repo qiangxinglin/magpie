@@ -4745,6 +4745,13 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request, p provider.
 	if named != nil {
 		spaces = &nsTidy{named: named, sse: sse}
 	}
+	// a Messages upstream's message_start with "usage":{} (no token
+	// counts), which a strict client turns away (usage_tidy.go); any
+	// other protocol's reply goes as it came
+	var usages *usageTidy
+	if proto == provider.Anthropic {
+		usages = &usageTidy{sse: sse}
+	}
 	// a Grok model's 2500.0 in a call's arguments, which Codex turns away
 	// (grok_integral.go, #1431); any other model's reply goes as it came
 	var ints *intTidy
@@ -4816,6 +4823,9 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request, p provider.
 			if spaces != nil {
 				out = spaces.write(out)
 			}
+			if usages != nil {
+				out = usages.write(out)
+			}
 			if ints != nil {
 				out = ints.write(out)
 			}
@@ -4843,6 +4853,9 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request, p provider.
 	// what's held at the end goes through the filters after the one
 	// that held it
 	sign := func(b []byte) []byte {
+		if usages != nil {
+			b = usages.write(b)
+		}
 		if ints != nil {
 			b = ints.write(b)
 		}
@@ -4876,6 +4889,16 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request, p provider.
 	}
 	if spaces != nil {
 		write(sign(spaces.flush()))
+	}
+	if usages != nil {
+		b := usages.flush()
+		if ints != nil {
+			b = ints.write(b)
+		}
+		if sigs != nil {
+			b = sigs.write(b)
+		}
+		write(out(b))
 	}
 	if ints != nil {
 		b := ints.flush()
